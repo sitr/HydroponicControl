@@ -1,9 +1,9 @@
 #include <Arduino.h>
 #include <ValveControl.h>
 
-const short reservoirInletValvePin = 5;
-const short bottomSensorPin = 22;
-const short topSensorPin = 23;
+const short reservoirInletValvePin = 4;
+const short bottomSensorPin = 2;
+const short topSensorPin = 3;
 
 ReservoirInletValve inletValve(reservoirInletValvePin, topSensorPin, bottomSensorPin);
 

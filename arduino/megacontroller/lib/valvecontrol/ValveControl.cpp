@@ -12,8 +12,8 @@ ReservoirInletValve::ReservoirInletValve(uint8_t inletPin, uint8_t topSensorPin,
 
 void ReservoirInletValve::begin() {
   pinMode(_inletPin, OUTPUT);
-  pinMode(_topSensorPin, INPUT);
-  pinMode(_bottomSensorPin, INPUT);
+  pinMode(_topSensorPin, INPUT_PULLUP);
+  pinMode(_bottomSensorPin, INPUT_PULLUP);
   closeValve();
 }
 
