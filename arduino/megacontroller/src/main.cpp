@@ -1,18 +1,17 @@
 #include <Arduino.h>
+#include <ValveControl.h>
 
-// put function declarations here:
-int myFunction(int, int);
+const short reservoirInletValvePin = 5;
+const short bottomSensorPin = 22;
+const short topSensorPin = 23;
+
+ReservoirInletValve inletValve(reservoirInletValvePin, topSensorPin, bottomSensorPin);
 
 void setup() {
-  // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+  inletValve.begin();
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
+  inletValve.checkReservoirLevel();
 }
 
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
-}
