@@ -1,0 +1,199 @@
+esphome:
+  name: hydroponic_controller
+  friendly_name: Hydroponic kontroller
+
+esp8266:
+  board: d1_mini
+  enable_scanf_float: true
+
+logger:
+  level: DEBUG
+  baud_rate: 0
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "Mega-Bridge-D1 Fallback"
+    password: "change-me-please"
+
+captive_portal:
+
+mqtt:
+  broker: 192.168.86.34
+  username: !secret hydroponic_mqtt_user
+  password: !secret hydroponic_mqtt_password
+  topic_prefix: hydroponic
+
+uart:
+  id: arduino_mega_uart
+  tx_pin: GPIO14   # D5
+  rx_pin: GPIO12   # D6
+  baud_rate: 9600
+  parity: NONE
+  stop_bits: 1
+
+globals:
+  - id: last_alive_ms
+    type: unsigned long
+    restore_value: no
+    initial_value: '0'
+
+  debug:
+    direction: RX
+    dummy_receiver: true
+    after:
+      delimiter: "\n"
+    sequence:
+      - lambda: |-
+          std::string line(bytes.begin(), bytes.end());
+
+          while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+            line.pop_back();
+          }
+
+          id(last_raw_line).publish_state(line);
+
+          # float temp = 0.0f;
+          # float humidity = 0.0f;
+          # int pump = 0;
+          # char mode[16] = {0};
+
+          # int matched = sscanf(
+          #   line.c_str(),
+          #   "STAT,temp=%f,humidity=%f,pump=%d,mode=%15[^,\r\n]",
+          #   &temp, &humidity, &pump, mode
+          # );
+
+          # if (matched == 4) {
+          #   id(mega_temp).publish_state(temp);
+          #   id(mega_humidity).publish_state(humidity);
+          #   id(pump_running).publish_state(pump == 1);
+          #   id(mega_mode).publish_state(mode);
+          # }
+
+sensor:
+  # - platform: template
+  #   name: "Mega Temperature"
+  #   id: mega_temp
+  #   unit_of_measurement: "°C"
+  #   device_class: temperature
+  #   state_class: measurement
+  #   accuracy_decimals: 1
+  #   update_interval: never
+
+  # - platform: template
+  #   name: "Mega Humidity"
+  #   id: mega_humidity
+  #   unit_of_measurement: "%"
+  #   device_class: humidity
+  #   state_class: measurement
+  #   accuracy_decimals: 1
+  #   update_interval: never
+
+binary_sensor:
+  - platform: template
+    name: "Mega Alive"
+    id: mega_alive
+    lambda: |-
+      return (millis() - id(last_alive_ms)) < 15000;
+    device_class: connectivity
+  # - platform: template
+  #   name: "Pump Running"
+  #   id: pump_running
+  #   device_class: running
+
+text_sensor:
+  - platform: template
+    name: "Mega Mode"
+    id: mega_mode
+    update_interval: never
+
+  - platform: template
+    name: "Mega Last Raw Line"
+    id: last_raw_line
+    update_interval: never
+
+button:
+  - platform: template
+    name: "Request Mega Status"
+    on_press:
+      - uart.write:
+          id: arduino_mega_uart
+          data: "GET\n"
+
+  - platform: template
+    name: "Pump ON"
+    on_press:
+      - uart.write:
+          id: arduino_mega_uart
+          data: "CMD,pump,ON\n"
+
+  - platform: template
+    name: "Pump OFF"
+    on_press:
+      - uart.write:
+          id: arduino_mega_uart
+          data: "CMD,pump,OFF\n"
+
+number:
+  - platform: template
+    name: "Mega Threshold"
+    id: mega_threshold
+    min_value: 0
+    max_value: 100
+    step: 1
+    optimistic: true
+    restore_value: true
+    set_action:
+      - uart.write:
+          id: arduino_mega_uart
+          data: !lambda |-
+            return str_sprintf("CFG,threshold,%.0f\n", x);
+
+  - platform: template
+    name: "Mega Report Interval"
+    id: mega_interval
+    min_value: 1
+    max_value: 3600
+    step: 1
+    unit_of_measurement: "s"
+    optimistic: true
+    restore_value: true
+    set_action:
+      - uart.write:
+          id: arduino_mega_uart
+          data: !lambda |-
+            return str_sprintf("CFG,interval,%.0f\n", x);
+
+switch:
+  - platform: template
+    name: "Pump Control"
+    optimistic: true
+    turn_on_action:
+      - uart.write:
+          id: arduino_mega_uart
+          data: "CMD,pump,ON\n"
+    turn_off_action:
+      - uart.write:
+          id: arduino_mega_uart
+          data: "CMD,pump,OFF\n"
+
+interval:
+  - interval: 30s
+    then:
+      - uart.write:
+          id: arduino_mega_uart
+          data: "GET\n"
+
+    - interval: 5s
+    then:
+      - uart.write: "PING\n"
+
+  - interval: 1s
+    then:
+      - component.update: mega_alive

@@ -6,38 +6,74 @@ ReservoirInletValve::ReservoirInletValve(uint8_t inletPin, uint8_t topSensorPin,
     _bottomSensorPin(bottomSensorPin),
     _previousMillis(0),
     _fillValveOpen(false),
-    _intervalMs(intervalMs)
+    _debounceIntervalMs(intervalMs),
+    _topSensorStableState(HIGH),
+    _topSensorLastReading(HIGH),
+    _topSensorLastChangeTime(0),
+    _bottomSensorStableState(HIGH),
+    _bottomSensorLastReading(HIGH),
+    _bottomSensorLastChangeTime(0)
 {
+}
+
+ReservoirInletValve::ReservoirInletValve(uint8_t inletPin, unsigned long intervalMs)
+{
+  _inletPin = inletPin;
 }
 
 void ReservoirInletValve::begin() {
   pinMode(_inletPin, OUTPUT);
-  pinMode(_topSensorPin, INPUT_PULLUP);
-  pinMode(_bottomSensorPin, INPUT_PULLUP);
+  pinMode(_topSensorPin, INPUT);
+  pinMode(_bottomSensorPin, INPUT);
   closeValve();
+}
+
+int ReservoirInletValve::debouncedRead(uint8_t pin, int &stableState, int &lastReading, unsigned long &lastChangeTime) {
+  unsigned long currentMillis = millis();
+  int reading = digitalRead(pin);
+
+  // If reading changed from last reading, start debounce timer
+  if (reading != lastReading) {
+    lastChangeTime = currentMillis;
+    lastReading = reading;
+  }
+  // If reading has been stable for DEBOUNCE_DELAY_MS, update stable state
+  else if (currentMillis - lastChangeTime >= DEBOUNCE_DELAY_MS) {
+    stableState = reading;
+  }
+
+  return stableState;
 }
 
 void ReservoirInletValve::checkReservoirLevel() {
   unsigned long currentMillis = millis();
-  if (currentMillis - _previousMillis < _intervalMs) {
+  if (currentMillis - _previousMillis < _debounceIntervalMs) {
     return;
   }
 
-  int topValue = digitalRead(_topSensorPin);
-  delay(200);
-  int bottomValue = digitalRead(_bottomSensorPin);
+  int topValue = debouncedRead(_topSensorPin, _topSensorStableState, _topSensorLastReading, _topSensorLastChangeTime);
+  int bottomValue = debouncedRead(_bottomSensorPin, _bottomSensorStableState, _bottomSensorLastReading, _bottomSensorLastChangeTime);
+  // Serial.println("Top sensor: " + String(topValue) + ", Bottom sensor: " + String(bottomValue));
 
   if (topValue == LOW && bottomValue == HIGH) {
-    if (_fillValveOpen) {
-      closeValve();
-    }
-  } else if (topValue == HIGH && bottomValue == LOW) {
+    // Reservoir is empty, open the valve if it's not already open
+    _reservoirEmpty = true;
     if (!_fillValveOpen) {
       openValve();
     }
+  } else if (topValue == HIGH && bottomValue == LOW) {
+    _reservoirEmpty = false;
+    // Reservoir is full, close the valve if it's not already closed
+    if (_fillValveOpen) {
+      closeValve();
+    }
   }
 
-  _previousMillis += _intervalMs;
+  _previousMillis += _debounceIntervalMs;
+}
+
+bool ReservoirInletValve::isReservoirEmpty() const {
+  return _reservoirEmpty;
 }
 
 bool ReservoirInletValve::isValveOpen() const {
@@ -47,9 +83,11 @@ bool ReservoirInletValve::isValveOpen() const {
 void ReservoirInletValve::openValve() {
   digitalWrite(_inletPin, LOW);
   _fillValveOpen = true;
+  Serial.println("Reservoir inlet valve opened.");
 }
 
 void ReservoirInletValve::closeValve() {
   digitalWrite(_inletPin, HIGH);
   _fillValveOpen = false;
+  Serial.println("Reservoir inlet valve closed.");
 }

@@ -5,10 +5,14 @@
 
 class ReservoirInletValve {
   public:
-    ReservoirInletValve(uint8_t inletPin, uint8_t topSensorPin, uint8_t bottomSensorPin, unsigned long intervalMs = 5000UL);
+    ReservoirInletValve(uint8_t inletPin, uint8_t topSensorPin, uint8_t bottomSensorPin, unsigned long intervalMs = 50UL);
+    ReservoirInletValve(uint8_t inletPin, unsigned long intervalMs = 50UL);
     void begin();
     void checkReservoirLevel();
     bool isValveOpen() const;
+    bool isReservoirEmpty() const;
+    void openValve();
+    void closeValve();
 
   private:
     uint8_t _inletPin;
@@ -16,10 +20,22 @@ class ReservoirInletValve {
     uint8_t _bottomSensorPin;
     unsigned long _previousMillis;
     bool _fillValveOpen;
-    unsigned long _intervalMs;
+    bool _reservoirEmpty;
+    unsigned long _debounceIntervalMs;
 
-    void openValve();
-    void closeValve();
+    // Debouncing variables for top sensor
+    int _topSensorStableState;
+    int _topSensorLastReading;
+    unsigned long _topSensorLastChangeTime;
+
+    // Debouncing variables for bottom sensor
+    int _bottomSensorStableState;
+    int _bottomSensorLastReading;
+    unsigned long _bottomSensorLastChangeTime;
+
+    static const unsigned long DEBOUNCE_DELAY_MS = 50UL;
+
+    int debouncedRead(uint8_t pin, int &stableState, int &lastReading, unsigned long &lastChangeTime);
 };
 
 #endif
