@@ -2,30 +2,40 @@
 #include <ValveControl.h>
 #include <Scale.h>
 
-
 const short RESERVOIR_INLET_VALVE_PIN = 4;
+const short RESERVOIR_BOTTOM_SENSOR_PIN = 2;
+const short RESERVOIR_TOP_SENSOR_PIN = 3;
 const short DB_INLET_VALVE_PIN = 7;
-const short BOTTOM_SENSOR_PIN = 2;
-const short TOP_SENSOR_PIN = 3;
 const short DB_SCALE_DOUT_PIN = 5;
 const short DB_SCALE_SCK_PIN = 6;
-const long scaleCalibrationFactor = 20000;
-const long scaleZeroFactor = 0;
+const short EF_SCALE_DOUT_PIN = 8;
+const short EF_SCALE_SCK_PIN = 9;
+const short EF_INLET_VALVE_PIN = 10;
+const long dbScaleCalibrationFactor = 20000;
+const long dbScaleZeroFactor = 0;
+const long efScaleCalibrationFactor = 20000;
+const long efScaleZeroFactor = 0;
+
 unsigned long currentMillis;
 unsigned long mainReservoirStatusMillis;
 unsigned long getAuxReservoirWeightMillis;
 static const unsigned long auxReservoirWeightInterval = 5000UL; // 5 seconds
-static const unsigned long mainReservoirCheckInterval = 60000UL; // 1 minute
+static const unsigned long mainReservoirCheckInterval = 10000UL; // 10 seconds
 float lastDutchBucketWeight = 0.0;
+float lastEbbFlowWeight = 0.0;
 float auxReservoirMinWeight = 0.0;
 float auxReservoirMaxWeight = 0.0;
 
-ReservoirInletValve mainReservoirInletValve(RESERVOIR_INLET_VALVE_PIN, TOP_SENSOR_PIN, BOTTOM_SENSOR_PIN);
+ReservoirInletValve mainReservoirInletValve(RESERVOIR_INLET_VALVE_PIN, RESERVOIR_TOP_SENSOR_PIN, RESERVOIR_BOTTOM_SENSOR_PIN);
 ReservoirInletValve dutchBucketInletValve(DB_INLET_VALVE_PIN);
-Scale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, scaleCalibrationFactor, scaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight);
+ReservoirInletValve ebbFlowInletValve(EF_INLET_VALVE_PIN);
+Scale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, dbScaleCalibrationFactor, dbScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight);
+Scale ebbFlowScale(EF_SCALE_DOUT_PIN, EF_SCALE_SCK_PIN, efScaleCalibrationFactor, efScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight);
 
 void sendStatus();
 void readCommands();
+void checkDutchBucketReservoirLevel();
+void checkEbbFlowReservoirLevel();
 
 void setup()
 {
@@ -35,6 +45,8 @@ void setup()
    dutchBucketInletValve.begin();
    dutchBucketScale.setupScale();
    dutchBucketScale.begin();
+   ebbFlowScale.setupScale();
+   ebbFlowScale.begin();
 }
 
 void loop()
@@ -47,9 +59,11 @@ void loop()
    }
    readCommands();
    dutchBucketScale.updateCalibration();
+   ebbFlowScale.updateCalibration();
    if (currentMillis - getAuxReservoirWeightMillis >= auxReservoirWeightInterval) 
    {
       checkDutchBucketReservoirLevel();
+      checkEbbFlowReservoirLevel();
       getAuxReservoirWeightMillis = currentMillis;
    }
 }
@@ -68,6 +82,23 @@ void checkDutchBucketReservoirLevel()
    else if (lastDutchBucketWeight >= auxReservoirMaxWeight)
    {
       dutchBucketInletValve.closeValve();
+   }
+}
+
+void checkEbbFlowReservoirLevel()
+{
+   lastEbbFlowWeight = ebbFlowScale.getWeight();
+   if (lastEbbFlowWeight < 0)
+   {
+      lastEbbFlowWeight = 0.0; // Ensure weight doesn't go negative
+   }
+   if (lastEbbFlowWeight < auxReservoirMinWeight)
+   {
+      ebbFlowInletValve.openValve();
+   }
+   else if (lastEbbFlowWeight >= auxReservoirMaxWeight)
+   {
+      ebbFlowInletValve.closeValve();
    }
 }
 
@@ -100,9 +131,19 @@ void readCommands()
          Serial2.println("CAL,DutchBucket,stop");
          dutchBucketScale.endCalMode();
       }
-      else if (cmd.startsWith("DB_RESERVOIR_CONFIG"))
+      else if (cmd == "STARTEFSCALECAL")
       {
-         String payload = cmd.substring(20); // drop "DB_RESERVOIR_CONFIG,"
+         Serial2.println("CAL,EbbFlow,start");
+         ebbFlowScale.beginCalMode();
+      }
+      else if (cmd == "STOPEFSCALECAL")
+      {
+         Serial2.println("CAL,EbbFlow,stop");
+         ebbFlowScale.endCalMode();
+      }
+      else if (cmd.startsWith("AUX_RESERVOIR_CONFIG"))
+      {
+         String payload = cmd.substring(21); // drop "AUX_RESERVOIR_CONFIG,"
          Serial.print("Received config payload: ");
          Serial.println(cmd);
          int i1 = payload.indexOf(',');
@@ -119,6 +160,9 @@ void sendStatus()
    int mainInletValveOpen = mainReservoirInletValve.isValveOpen() ? 1 : 0;
    int dutchBucketInletValveOpen = dutchBucketInletValve.isValveOpen() ? 1 : 0;
    int dutchBucketReservoirEmpty = lastDutchBucketWeight < auxReservoirMinWeight ? 1 : 0;
+   int ebbFlowInletValveOpen = ebbFlowInletValve.isValveOpen() ? 1 : 0;
+   int ebbFlowReservoirEmpty = lastEbbFlowWeight < auxReservoirMinWeight ? 1 : 0;
+   int calibrationActive = dutchBucketScale.isCalModeActive() ? 1 : 0;
 
    Serial2.print("STAT,mainReservoirEmpty=");
    Serial2.print(mainReservoirEmpty);
@@ -129,5 +173,13 @@ void sendStatus()
    Serial2.print(",dutchBucketInletValveOpen=");
    Serial2.print(dutchBucketInletValveOpen);
    Serial2.print(",dutchBucketReservoirEmpty=");
-   Serial2.println(dutchBucketReservoirEmpty);
+   Serial2.print(dutchBucketReservoirEmpty);
+   Serial2.print(",efReservoirWeight=");
+   Serial2.print(lastEbbFlowWeight);
+   Serial2.print(",ebbFlowInletValveOpen=");
+   Serial2.print(ebbFlowInletValveOpen);
+   Serial2.print(",ebbFlowReservoirEmpty=");
+   Serial2.print(ebbFlowReservoirEmpty);
+   Serial2.print(",calibrationActive=");
+   Serial2.println(calibrationActive);
 }
