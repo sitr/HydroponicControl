@@ -25,6 +25,11 @@ float Scale::getWeight()
    return weight;
 }
 
+bool Scale::isCalModeActive()
+{
+   return scaleCalMode;
+}
+
 void Scale::setupScale()
 {
    EEPROM.get(cfAddress, _mixingRes.calibrationFactor);
@@ -43,6 +48,7 @@ void Scale::beginCalMode()
    char buff[80];
    scaleCalMillis = millis();
    Serial.println("<HX711: Calibration starting.>");
+   Serial2.println("CAL,DutchBucket,start");
    delay(1500);
    for (int i = 10; i >= 0; i--)
    {
@@ -51,6 +57,7 @@ void Scale::beginCalMode()
       delay(1000);
    }
    Serial.println("<HX711: Taring scale...>");
+   Serial2.println("CAL,DutchBucket,taring");
    delay(2000);
    scale.set_scale();
    scale.tare(); // Reset the scale to 0
@@ -62,12 +69,14 @@ void Scale::beginCalMode()
       delay(1000);
    }
    Serial.println("<HX711: Zero factor applied. Add known weight now and adjust calibration factor.>");
+   Serial2.println("CAL,DutchBucket,zero_applied");
    _mixingRes.zeroFactor = scale.read_average(); // Get a baseline reading
    Serial.print("zero factor: ");
    Serial.println(_mixingRes.zeroFactor);
    scale.set_offset(_mixingRes.zeroFactor);
    delay(1500);
    scaleCalMode = true;
+   Serial2.println("CAL,DutchBucket,active");
 }
 
 void Scale::endCalMode()
@@ -75,9 +84,10 @@ void Scale::endCalMode()
    scaleCalMode = false;
    EEPROM.put(cfAddress, _mixingRes.calibrationFactor);
    EEPROM.put(zfAddress, _mixingRes.zeroFactor); 
-   Serial3.print("<HX711: Calibration saved to EEPROM!>");
+   Serial.println("<HX711: Calibration saved to EEPROM!>");
    Serial.println(_mixingRes.calibrationFactor);
    Serial.println(_mixingRes.zeroFactor);
+   Serial2.println("CAL,DutchBucket,stop");
    scale.tare();
 }
 
@@ -98,6 +108,9 @@ void Scale::updateCalibration()
    if (scaleCalMode && (now - scaleCalMillis >= scaleCalPeriod))
    {
       calibrateScale();
+      // Send calibration weight reading to ESP32/HomeAssistant
+      Serial2.print("CAL,DutchBucket,weight=");
+      Serial2.println(scale.get_units(), 1);
       scaleCalMillis = now;
    }
 }

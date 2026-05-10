@@ -11,6 +11,7 @@ class Scale {
       void updateCalibration();
       void setupScale();
       float getWeight();
+      bool isCalModeActive();
 
    private:
       HX711 scale;
