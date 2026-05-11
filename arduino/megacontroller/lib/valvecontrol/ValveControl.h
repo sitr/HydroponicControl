@@ -11,6 +11,7 @@ class ReservoirInletValve {
     void checkReservoirLevel();
     bool isValveOpen() const;
     bool isReservoirEmpty() const;
+    String getReservoirStatus() const;
     void openValve();
     void closeValve();
 

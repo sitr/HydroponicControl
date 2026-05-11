@@ -137,8 +137,6 @@ void readCommands()
       else if (cmd.startsWith("AUX_RESERVOIR_CONFIG"))
       {
          String payload = cmd.substring(21); // drop "AUX_RESERVOIR_CONFIG,"
-         // Serial.print("Received config payload: ");
-         // Serial.println(cmd);
          int i1 = payload.indexOf(',');
          int i2 = payload.indexOf(',', i1 + 1);
          auxReservoirMinWeight = payload.substring(i1 + 1, i2).toInt();
@@ -149,29 +147,20 @@ void readCommands()
 
 void sendStatus()
 {
-   Serial.println("DB weight: " + String(lastDutchBucketWeight) + " kg, EF weight: " + String(lastEbbFlowWeight) + " kg");
-   int mainReservoirEmpty = mainReservoirInletValve.isReservoirEmpty() ? 1 : 0;
    int mainInletValveOpen = mainReservoirInletValve.isValveOpen() ? 1 : 0;
    int dutchBucketInletValveOpen = dutchBucketInletValve.isValveOpen() ? 1 : 0;
-   int dutchBucketReservoirEmpty = lastDutchBucketWeight < auxReservoirMinWeight ? 1 : 0;
    int ebbFlowInletValveOpen = ebbFlowInletValve.isValveOpen() ? 1 : 0;
-   int ebbFlowReservoirEmpty = lastEbbFlowWeight < auxReservoirMinWeight ? 1 : 0;
 
-   Serial2.print("STAT,M_R_Empty=");
-   Serial2.print(mainReservoirEmpty);
+   Serial2.print("STAT,M_R_Status=");
+   Serial2.print(mainReservoirInletValve.getReservoirStatus());
    Serial2.print(",MI_IV_O=");
    Serial2.print(mainInletValveOpen);
    Serial2.print(",DB_Weight=");
    Serial2.print(lastDutchBucketWeight);
    Serial2.print(",DB_IV_O=");
    Serial2.print(dutchBucketInletValveOpen);
-   Serial2.print(",DB_R_Empty=");
-   Serial2.print(dutchBucketReservoirEmpty);
    Serial2.print(",EF_Weight=");
    Serial2.print(lastEbbFlowWeight);
    Serial2.print(",EF_IV_O=");
-   Serial2.print(ebbFlowInletValveOpen);
-   Serial2.print(",EF_R_Empty=");
-   Serial2.println(ebbFlowReservoirEmpty);
-
+   Serial2.println(ebbFlowInletValveOpen);
 }
