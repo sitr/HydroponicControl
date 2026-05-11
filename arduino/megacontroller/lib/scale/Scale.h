@@ -3,7 +3,7 @@
 
 class Scale {
    public:
-      Scale(int doutPin, int sckPin, long calibrationFactor, long zeroFactor, int minWeight, int maxWeight);
+      Scale(int doutPin, int sckPin, long calibrationFactor, long zeroFactor, int minWeight, int maxWeight, int eepromAddress = 0, int weightSign = -1);
       void begin();
       void beginCalMode();
       void endCalMode();
@@ -18,8 +18,9 @@ class Scale {
       bool scaleCalMode;
       unsigned long scaleCalMillis;
       static const unsigned long scaleCalPeriod = 500;
-      int cfAddress = 0;
-      int zfAddress = 4;
+      int _cfAddress;
+      int _zfAddress;
+      int _weightSign;
       int _minWeight;
       int _maxWeight;
 

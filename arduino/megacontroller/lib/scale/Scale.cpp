@@ -2,15 +2,18 @@
 #include <HX711.h>
 #include <EEPROM.h>
 
-Scale::Scale(int doutPin, int sckPin, long calibrationFactor, long zeroFactor, int minWeight, int maxWeight)
+Scale::Scale(int doutPin, int sckPin, long calibrationFactor, long zeroFactor, int minWeight, int maxWeight, int eepromAddress, int weightSign)
+  : _cfAddress(eepromAddress),
+    _zfAddress(eepromAddress + 4),
+    _weightSign(weightSign),
+    _minWeight(minWeight),
+    _maxWeight(maxWeight),
+    scaleCalMode(false)
 {
    _mixingRes.scaleDoutPin = doutPin;
    _mixingRes.scaleSckPin = sckPin;
    _mixingRes.calibrationFactor = calibrationFactor;
    _mixingRes.zeroFactor = zeroFactor;
-   _minWeight = minWeight;
-   _maxWeight = maxWeight;
-   scaleCalMode = false;
 }
 
 void Scale::begin()
@@ -21,7 +24,7 @@ void Scale::begin()
 
 float Scale::getWeight()
 {
-   float weight = scale.get_units(5) * (-1);
+   float weight = scale.get_units(5) * _weightSign;
    return weight;
 }
 
@@ -32,8 +35,8 @@ bool Scale::isCalModeActive()
 
 void Scale::setupScale()
 {
-   EEPROM.get(cfAddress, _mixingRes.calibrationFactor);
-   EEPROM.get(zfAddress, _mixingRes.zeroFactor);
+   EEPROM.get(_cfAddress, _mixingRes.calibrationFactor);
+   EEPROM.get(_zfAddress, _mixingRes.zeroFactor);
    char buff[80];
    sprintf(buff, "<HX711: Loaded calibration factor of %ld and zero factor of %ld>", _mixingRes.calibrationFactor, _mixingRes.zeroFactor);
    Serial.println(buff);
@@ -82,8 +85,8 @@ void Scale::beginCalMode()
 void Scale::endCalMode()
 {
    scaleCalMode = false;
-   EEPROM.put(cfAddress, _mixingRes.calibrationFactor);
-   EEPROM.put(zfAddress, _mixingRes.zeroFactor); 
+   EEPROM.put(_cfAddress, _mixingRes.calibrationFactor);
+   EEPROM.put(_zfAddress, _mixingRes.zeroFactor); 
    Serial.println("<HX711: Calibration saved to EEPROM!>");
    Serial.println(_mixingRes.calibrationFactor);
    Serial.println(_mixingRes.zeroFactor);

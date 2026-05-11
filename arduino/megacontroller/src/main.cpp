@@ -13,7 +13,7 @@ const short EF_SCALE_SCK_PIN = 9;
 const short EF_INLET_VALVE_PIN = 10;
 const long dbScaleCalibrationFactor = 20000;
 const long dbScaleZeroFactor = 0;
-const long efScaleCalibrationFactor = 20000;
+const long efScaleCalibrationFactor = 25000;
 const long efScaleZeroFactor = 0;
 
 unsigned long currentMillis;
@@ -29,8 +29,8 @@ float auxReservoirMaxWeight = 0.0;
 ReservoirInletValve mainReservoirInletValve(RESERVOIR_INLET_VALVE_PIN, RESERVOIR_TOP_SENSOR_PIN, RESERVOIR_BOTTOM_SENSOR_PIN);
 ReservoirInletValve dutchBucketInletValve(DB_INLET_VALVE_PIN);
 ReservoirInletValve ebbFlowInletValve(EF_INLET_VALVE_PIN);
-Scale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, dbScaleCalibrationFactor, dbScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight);
-Scale ebbFlowScale(EF_SCALE_DOUT_PIN, EF_SCALE_SCK_PIN, efScaleCalibrationFactor, efScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight);
+Scale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, dbScaleCalibrationFactor, dbScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 0, 1);
+Scale ebbFlowScale(EF_SCALE_DOUT_PIN, EF_SCALE_SCK_PIN, efScaleCalibrationFactor, efScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 8, 1);
 
 void sendStatus();
 void readCommands();
@@ -45,6 +45,7 @@ void setup()
    dutchBucketInletValve.begin();
    dutchBucketScale.setupScale();
    dutchBucketScale.begin();
+   ebbFlowInletValve.begin();
    ebbFlowScale.setupScale();
    ebbFlowScale.begin();
 }
@@ -70,11 +71,7 @@ void loop()
 
 void checkDutchBucketReservoirLevel()
 {
-   lastDutchBucketWeight = dutchBucketScale.getWeight();
-   if (lastDutchBucketWeight < 0)
-   {
-      lastDutchBucketWeight = 0.0; // Ensure weight doesn't go negative
-   }
+   lastDutchBucketWeight = fabs(dutchBucketScale.getWeight());
    if (lastDutchBucketWeight < auxReservoirMinWeight)
    {
       dutchBucketInletValve.openValve();
@@ -87,11 +84,7 @@ void checkDutchBucketReservoirLevel()
 
 void checkEbbFlowReservoirLevel()
 {
-   lastEbbFlowWeight = ebbFlowScale.getWeight();
-   if (lastEbbFlowWeight < 0)
-   {
-      lastEbbFlowWeight = 0.0; // Ensure weight doesn't go negative
-   }
+   lastEbbFlowWeight = fabs(ebbFlowScale.getWeight());
    if (lastEbbFlowWeight < auxReservoirMinWeight)
    {
       ebbFlowInletValve.openValve();
@@ -144,8 +137,8 @@ void readCommands()
       else if (cmd.startsWith("AUX_RESERVOIR_CONFIG"))
       {
          String payload = cmd.substring(21); // drop "AUX_RESERVOIR_CONFIG,"
-         Serial.print("Received config payload: ");
-         Serial.println(cmd);
+         // Serial.print("Received config payload: ");
+         // Serial.println(cmd);
          int i1 = payload.indexOf(',');
          int i2 = payload.indexOf(',', i1 + 1);
          auxReservoirMinWeight = payload.substring(i1 + 1, i2).toInt();
@@ -156,30 +149,29 @@ void readCommands()
 
 void sendStatus()
 {
+   Serial.println("DB weight: " + String(lastDutchBucketWeight) + " kg, EF weight: " + String(lastEbbFlowWeight) + " kg");
    int mainReservoirEmpty = mainReservoirInletValve.isReservoirEmpty() ? 1 : 0;
    int mainInletValveOpen = mainReservoirInletValve.isValveOpen() ? 1 : 0;
    int dutchBucketInletValveOpen = dutchBucketInletValve.isValveOpen() ? 1 : 0;
    int dutchBucketReservoirEmpty = lastDutchBucketWeight < auxReservoirMinWeight ? 1 : 0;
    int ebbFlowInletValveOpen = ebbFlowInletValve.isValveOpen() ? 1 : 0;
    int ebbFlowReservoirEmpty = lastEbbFlowWeight < auxReservoirMinWeight ? 1 : 0;
-   int calibrationActive = dutchBucketScale.isCalModeActive() ? 1 : 0;
 
-   Serial2.print("STAT,mainReservoirEmpty=");
+   Serial2.print("STAT,M_R_Empty=");
    Serial2.print(mainReservoirEmpty);
-   Serial2.print(",mainInletValveOpen=");
+   Serial2.print(",MI_IV_O=");
    Serial2.print(mainInletValveOpen);
-   Serial2.print(",dbReservoirWeight=");
+   Serial2.print(",DB_Weight=");
    Serial2.print(lastDutchBucketWeight);
-   Serial2.print(",dutchBucketInletValveOpen=");
+   Serial2.print(",DB_IV_O=");
    Serial2.print(dutchBucketInletValveOpen);
-   Serial2.print(",dutchBucketReservoirEmpty=");
+   Serial2.print(",DB_R_Empty=");
    Serial2.print(dutchBucketReservoirEmpty);
-   Serial2.print(",efReservoirWeight=");
+   Serial2.print(",EF_Weight=");
    Serial2.print(lastEbbFlowWeight);
-   Serial2.print(",ebbFlowInletValveOpen=");
+   Serial2.print(",EF_IV_O=");
    Serial2.print(ebbFlowInletValveOpen);
-   Serial2.print(",ebbFlowReservoirEmpty=");
-   Serial2.print(ebbFlowReservoirEmpty);
-   Serial2.print(",calibrationActive=");
-   Serial2.println(calibrationActive);
+   Serial2.print(",EF_R_Empty=");
+   Serial2.println(ebbFlowReservoirEmpty);
+
 }
