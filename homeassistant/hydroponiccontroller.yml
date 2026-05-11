@@ -1,5 +1,5 @@
 esphome:
-  name: hydroponic_controller
+  name: hydroponiccontroller
   friendly_name: Hydroponic kontroller
 
 esp8266:
@@ -23,25 +23,21 @@ wifi:
 
 captive_portal:
 
-mqtt:
-  broker: 192.168.86.34
-  username: !secret hydroponic_mqtt_user
-  password: !secret hydroponic_mqtt_password
-  topic_prefix: hydroponic
-
-uart:
-  id: arduino_mega_uart
-  tx_pin: GPIO14   # D5
-  rx_pin: GPIO12   # D6
-  baud_rate: 9600
-  parity: NONE
-  stop_bits: 1
+api:
 
 globals:
   - id: last_alive_ms
     type: unsigned long
     restore_value: no
     initial_value: '0'
+    
+uart:
+  id: arduino_mega_uart
+  tx_pin: GPIO01   # TX
+  rx_pin: GPIO03   # RX
+  baud_rate: 115200
+  parity: NONE
+  stop_bits: 1
 
   debug:
     direction: RX
@@ -56,44 +52,148 @@ globals:
             line.pop_back();
           }
 
-          id(last_raw_line).publish_state(line);
+          if (line == "ALIVE") {
+            id(last_alive_ms) = millis();
+          }
 
-          # float temp = 0.0f;
-          # float humidity = 0.0f;
-          # int pump = 0;
-          # char mode[16] = {0};
+          if (line.find("STAT,") == 0) {
+            int mainReservoirEmpty = 0;
+            int mainInletValveOpen = 0;
+            float dutchBucketReservoirWeight = 0.0f;
+            int dutchBucketInletValveOpen = 0;
+            int dutchBucketReservoirEmpty = 0;
+            float ebbFlowReservoirWeight = 0.0f;
+            int ebbFlowInletValveOpen = 0;
+            int ebbFlowReservoirEmpty = 0;
+            int scaleIsCalibrating = 0;
 
-          # int matched = sscanf(
-          #   line.c_str(),
-          #   "STAT,temp=%f,humidity=%f,pump=%d,mode=%15[^,\r\n]",
-          #   &temp, &humidity, &pump, mode
-          # );
+            int matched = sscanf(
+              line.c_str(),
+              "STAT,M_R_Empty=%d,MI_IV_O=%d,DB_Weight=%f,DB_IV_O=%d,DB_R_Empty=%d,EF_Weight=%f,EF_IV_O=%d,EF_R_Empty=%d[^,\r\n]",
+              &mainReservoirEmpty, 
+              &mainInletValveOpen, 
+              &dutchBucketReservoirWeight, 
+              &dutchBucketInletValveOpen, 
+              &dutchBucketReservoirEmpty, 
+              &ebbFlowReservoirWeight, 
+              &ebbFlowInletValveOpen, 
+              &ebbFlowReservoirEmpty
+            );
+            id(status_debug).publish_state(line);
+            id(main_reservoir_empty).publish_state(mainReservoirEmpty);
+            id(main_inlet_valve_status).publish_state(mainInletValveOpen);
+            id(dutch_bucket_reservoir_weight).publish_state(dutchBucketReservoirWeight);
+            id(dutch_bucket_inlet_valve_status).publish_state(dutchBucketInletValveOpen);
+            id(dutch_bucket_reservoir_empty).publish_state(dutchBucketReservoirEmpty);
+            id(ebb_flow_reservoir_weight).publish_state(ebbFlowReservoirWeight);
+            id(ebb_flow_inlet_valve_status).publish_state(ebbFlowInletValveOpen);
+            id(ebb_flow_reservoir_empty).publish_state(ebbFlowReservoirEmpty);
+          }
 
-          # if (matched == 4) {
-          #   id(mega_temp).publish_state(temp);
-          #   id(mega_humidity).publish_state(humidity);
-          #   id(pump_running).publish_state(pump == 1);
-          #   id(mega_mode).publish_state(mode);
-          # }
+          // Handle CAL messages
+          if (line.find("CAL,DutchBucket,") == 0) {
+            id(scale_is_calibrating).publish_state(1);
+            std::string cal_data = line.substr(16); // Remove "CAL,DutchBucket,"
+            
+            if (cal_data == "start") {
+              id(calibration_status).publish_state("Starting");
+            } 
+            else if (cal_data == "taring") {
+              id(calibration_status).publish_state("Taring");
+            } 
+            else if (cal_data == "zero_applied") {
+              id(calibration_status).publish_state("Zero applied");
+            } 
+            else if (cal_data == "active") {
+              id(calibration_status).publish_state("Active");
+            } 
+            else if (cal_data == "stop") {
+              id(calibration_status).publish_state("Idle");
+              id(scale_is_calibrating).publish_state(0);
+
+            } 
+            else if (cal_data.find("weight=") == 0) {
+              // Live weight reading during calibration
+              float weight = 0.0;
+              if (sscanf(cal_data.c_str(), "weight=%f", &weight) == 1) {
+                id(calibration_weight).publish_state(weight);
+              }
+            }
+            return;
+          }
+
+text_sensor:
+  - platform: template
+    name: "Main reservoir status"
+    icon: mdi:barrel
+    lambda: |-
+      if (id(main_reservoir_empty).state) {
+        return {"Full"};
+      } else {
+        return {"Empty"};
+      }
+    update_interval: 10s
+
+  - platform: template
+    name: "Dutch bucket reservoir status"
+    icon: mdi:cup-outline
+    lambda: |-
+      if (id(dutch_bucket_reservoir_empty).state) {
+        return {"Full"};
+      } else {
+        return {"Empty"};
+      }
+    update_interval: 10s
+
+  - platform: template
+    name: "Ebb flow reservoir status"
+    icon: mdi:cup-outline
+    lambda: |-
+      if (id(ebb_flow_reservoir_empty).state) {
+        return {"Full"};
+      } else {
+        return {"Empty"};
+      }
+    update_interval: 10s   
+
+  - platform: template
+    name: "Calibration Status"
+    id: calibration_status
+    lambda: |-
+      return {"Idle"};
+
+  - platform: template
+    name: "Status debug"
+    id: status_debug
 
 sensor:
-  # - platform: template
-  #   name: "Mega Temperature"
-  #   id: mega_temp
-  #   unit_of_measurement: "°C"
-  #   device_class: temperature
-  #   state_class: measurement
-  #   accuracy_decimals: 1
-  #   update_interval: never
+  - platform: template
+    name: "Dutch bucket reservoir weight"
+    id: dutch_bucket_reservoir_weight
+    unit_of_measurement: "kg"
+    accuracy_decimals: 1
+    icon: mdi:scale
 
-  # - platform: template
-  #   name: "Mega Humidity"
-  #   id: mega_humidity
-  #   unit_of_measurement: "%"
-  #   device_class: humidity
-  #   state_class: measurement
-  #   accuracy_decimals: 1
-  #   update_interval: never
+  - platform: template
+    name: "Ebb flow reservoir weight"
+    id: ebb_flow_reservoir_weight
+    unit_of_measurement: "kg"
+    accuracy_decimals: 1
+    icon: mdi:scale
+
+  - platform: homeassistant
+    id: aux_reservoir_min_volume
+    entity_id: input_number.aux_reservoir_min_volume
+
+  - platform: homeassistant
+    id: aux_reservoir_max_volume
+    entity_id: input_number.aux_reservoir_max_volume
+
+  - platform: template
+    name: "Calibration Weight"
+    id: calibration_weight
+    unit_of_measurement: "kg"
+    accuracy_decimals: 1
 
 binary_sensor:
   - platform: template
@@ -102,98 +202,97 @@ binary_sensor:
     lambda: |-
       return (millis() - id(last_alive_ms)) < 15000;
     device_class: connectivity
-  # - platform: template
-  #   name: "Pump Running"
-  #   id: pump_running
-  #   device_class: running
-
-text_sensor:
-  - platform: template
-    name: "Mega Mode"
-    id: mega_mode
-    update_interval: never
 
   - platform: template
-    name: "Mega Last Raw Line"
-    id: last_raw_line
-    update_interval: never
-
-button:
-  - platform: template
-    name: "Request Mega Status"
-    on_press:
-      - uart.write:
-          id: arduino_mega_uart
-          data: "GET\n"
+    id: main_reservoir_empty
+    filters: 
+      - invert: 
+    device_class: moisture
 
   - platform: template
-    name: "Pump ON"
-    on_press:
-      - uart.write:
-          id: arduino_mega_uart
-          data: "CMD,pump,ON\n"
+    name: "Main inlet valve status"
+    id: main_inlet_valve_status
+    device_class: opening
+    icon: mdi:pipe-valve
 
   - platform: template
-    name: "Pump OFF"
-    on_press:
-      - uart.write:
-          id: arduino_mega_uart
-          data: "CMD,pump,OFF\n"
-
-number:
-  - platform: template
-    name: "Mega Threshold"
-    id: mega_threshold
-    min_value: 0
-    max_value: 100
-    step: 1
-    optimistic: true
-    restore_value: true
-    set_action:
-      - uart.write:
-          id: arduino_mega_uart
-          data: !lambda |-
-            return str_sprintf("CFG,threshold,%.0f\n", x);
+    name: "Dutch bucket inlet valve status"
+    id: dutch_bucket_inlet_valve_status
+    device_class: opening
+    icon: mdi:pipe-valve
 
   - platform: template
-    name: "Mega Report Interval"
-    id: mega_interval
-    min_value: 1
-    max_value: 3600
-    step: 1
-    unit_of_measurement: "s"
-    optimistic: true
-    restore_value: true
-    set_action:
-      - uart.write:
-          id: arduino_mega_uart
-          data: !lambda |-
-            return str_sprintf("CFG,interval,%.0f\n", x);
+    name: "Ebb flow inlet valve status"
+    id: ebb_flow_inlet_valve_status
+    device_class: opening
+    icon: mdi:pipe-valve
+
+  - platform: template
+    id: dutch_bucket_reservoir_empty
+    filters:
+      - invert:
+    device_class: moisture
+
+  - platform: template
+    id: ebb_flow_reservoir_empty
+    filters:
+      - invert:
+    device_class: moisture
+
+  - platform: template
+    name: "Scale is calibrating"
+    id: scale_is_calibrating
+    icon: mdi:knob
+    lambda: |-
+      return false;
 
 switch:
   - platform: template
-    name: "Pump Control"
+    name: "Main valve"
+    optimistic: true
+    turn_on_action: 
+      - uart.write: "OPENMAINVALVE"
+    turn_off_action: 
+      - uart.write: "CLOSEMAINVALVE"
+
+  - platform: template
+    name: "Calibrate DB scale"
+    icon: mdi:knob
     optimistic: true
     turn_on_action:
-      - uart.write:
-          id: arduino_mega_uart
-          data: "CMD,pump,ON\n"
+      - uart.write: "STARTDBSCALECAL"
     turn_off_action:
-      - uart.write:
-          id: arduino_mega_uart
-          data: "CMD,pump,OFF\n"
+      - uart.write: "STOPDBSCALECAL"
+
+  - platform: template
+    name: "Calibrate EF scale"
+    icon: mdi:knob
+    optimistic: true
+    turn_on_action:
+      - uart.write: "STARTEFSCALECAL"
+    turn_off_action:
+      - uart.write: "STOPEFSCALECAL"
 
 interval:
-  - interval: 30s
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !id(scale_is_calibrating).state;
+          then:
+            - uart.write: "STATUS"
+
+  - interval: 10s
     then:
       - uart.write:
-          id: arduino_mega_uart
-          data: "GET\n"
+          data: !lambda |-
+            int min_vol = (int) id(aux_reservoir_min_volume).state;
+            int max_vol = (int) id(aux_reservoir_max_volume).state;
 
-    - interval: 5s
-    then:
-      - uart.write: "PING\n"
-
-  - interval: 1s
-    then:
-      - component.update: mega_alive
+            std::string message = str_sprintf(
+              "AUX_RESERVOIR_CONFIG,%d,%d\r\n",
+              min_vol,
+              max_vol
+            );
+            return std::vector<uint8_t>(message.begin(), message.end());
