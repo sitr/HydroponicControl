@@ -75,7 +75,6 @@ void ReservoirInletValve::checkReservoirLevel() {
 
   int topValue = debouncedRead(_topSensorPin, _topSensorStableState, _topSensorLastReading, _topSensorLastChangeTime);
   int bottomValue = debouncedRead(_bottomSensorPin, _bottomSensorStableState, _bottomSensorLastReading, _bottomSensorLastChangeTime);
-  //Serial.println("Top sensor: " + String(topValue) + ", Bottom sensor: " + String(bottomValue));
 
   if (topValue == LOW && bottomValue == HIGH) {
     // Reservoir is empty, open the valve if it's not already open
@@ -103,11 +102,9 @@ bool ReservoirInletValve::isValveOpen() const {
 void ReservoirInletValve::openValve() {
   digitalWrite(_inletPin, LOW);
   _fillValveOpen = true;
-  //Serial.println("Reservoir inlet valve opened.");
 }
 
 void ReservoirInletValve::closeValve() {
   digitalWrite(_inletPin, HIGH);
   _fillValveOpen = false;
-  //Serial.println("Reservoir inlet valve closed.");
 }
