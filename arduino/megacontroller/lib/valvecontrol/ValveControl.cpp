@@ -99,17 +99,18 @@ String ReservoirInletValve::getReservoirStatus() const {
   if (_topSensorPin == 0xFF || _bottomSensorPin == 0xFF) {
     return "Unknown";
   }
-
   if (_topSensorStableState == LOW && _bottomSensorStableState == HIGH) {
     return "Empty";
   }
   if (_topSensorStableState == HIGH && _bottomSensorStableState == LOW) {
     return "Full";
   }
-  if (_topSensorStableState == LOW && _bottomSensorStableState == LOW) {
-    return "Partial";
+  if (_topSensorStableState == LOW && _bottomSensorStableState == LOW && !isValveOpen()) {
+    return "In use";
   }
-
+  if (_topSensorStableState == LOW && _bottomSensorStableState == LOW && isValveOpen()) {
+    return "Filling";
+  }
   return "Unknown";
 }
 
