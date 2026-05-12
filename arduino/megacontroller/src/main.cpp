@@ -151,9 +151,11 @@ void sendStatus()
    int dutchBucketInletValveOpen = dutchBucketInletValve.isValveOpen() ? 1 : 0;
    int ebbFlowInletValveOpen = ebbFlowInletValve.isValveOpen() ? 1 : 0;
 
-   Serial2.print("STAT,M_R_Status=");
+   //MR = Main Reservoir, IV = Inlet Valve, DB = Dutch Bucket, EF = Ebb & Flow, O = Open
+
+   Serial2.print("STAT,MR_Status=");
    Serial2.print(mainReservoirInletValve.getReservoirStatus());
-   Serial2.print(",MI_IV_O=");
+   Serial2.print(",MR_IV_O=");
    Serial2.print(mainInletValveOpen);
    Serial2.print(",DB_Weight=");
    Serial2.print(lastDutchBucketWeight);
