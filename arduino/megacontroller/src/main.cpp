@@ -3,6 +3,7 @@
 #include <Scale.h>
 #include <PwmControl.h>
 #include <NutrientPumpController.h>
+#include <WaterFlowSensor.h>
 
 //PWM
 const short FLORA_GROW_PUMP_PIN = 2;
@@ -10,15 +11,22 @@ const short FLORA_MICRO_PUMP_PIN = 3;
 const short FLORA_BLOOM_PUMP_PIN = 4;
 const short PH_DOWN_PUMP_PIN = 5;
 //Digital
+const short RESERVOIR_FLOW_SENSOR_PIN = 19; // FS300A flow sensor input pin
 const short RESERVOIR_BOTTOM_SENSOR_PIN = 22;
 const short RESERVOIR_TOP_SENSOR_PIN = 23;
-const short RESERVOIR_INLET_VALVE_PIN = 24;
-const short DB_SCALE_DOUT_PIN = 25;
-const short DB_SCALE_SCK_PIN = 26;
-const short DB_INLET_VALVE_PIN = 27;
-const short EF_SCALE_DOUT_PIN = 28;
-const short EF_SCALE_SCK_PIN = 29;
-const short EF_INLET_VALVE_PIN = 30;
+
+const short DB_SCALE_DOUT_PIN = 24;
+const short DB_SCALE_SCK_PIN = 25;
+const short EF_SCALE_DOUT_PIN = 26;
+const short EF_SCALE_SCK_PIN = 27;
+
+const short RESERVOIR_INLET_VALVE_PIN = 28;
+const short DB_INLET_VALVE_PIN = 29; // Pin 2 on relay board
+const short EF_INLET_VALVE_PIN = 30; // Pin 3 on relay board
+const short DB_NUTRIENT_VALVE_PIN = 31; // Pin 4 on relay board
+const short EF_NUTRIENT_VALVE_PIN = 32; // Pin 5 on relay board
+
+const float RESERVOIR_FLOW_PULSES_PER_LITRE = 60.0f;
 
 const long dbScaleCalibrationFactor = 20000;
 const long dbScaleZeroFactor = 0;
@@ -35,6 +43,7 @@ float lastDutchBucketWeight = 0.0;
 float lastEbbFlowWeight = 0.0;
 float auxReservoirMinWeight = 0.0;
 float auxReservoirMaxWeight = 0.0;
+float mainInletValveflowRate = 0.0f;
 
 PwmControl floraGrowPump(FLORA_GROW_PUMP_PIN, false);
 PwmControl floraMicroPump(FLORA_MICRO_PUMP_PIN, false);
@@ -48,6 +57,7 @@ ReservoirInletValve dutchBucketInletValve(DB_INLET_VALVE_PIN);
 ReservoirInletValve ebbFlowInletValve(EF_INLET_VALVE_PIN);
 Scale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, dbScaleCalibrationFactor, dbScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 0, 1);
 Scale ebbFlowScale(EF_SCALE_DOUT_PIN, EF_SCALE_SCK_PIN, efScaleCalibrationFactor, efScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 8, 1);
+WaterFlowSensor reservoirFlowSensor(RESERVOIR_FLOW_SENSOR_PIN, RESERVOIR_FLOW_PULSES_PER_LITRE);
 
 void sendStatus();
 void readCommands();
@@ -71,19 +81,32 @@ void setup()
    ebbFlowInletValve.begin();
    ebbFlowScale.setupScale();
    ebbFlowScale.begin();
+   reservoirFlowSensor.begin();
 }
 
 void loop()
 {
+   reservoirFlowSensor.update();
    currentMillis = millis();
+   reservoirFlowSensor.setActive(mainReservoirInletValve.isValveOpen());
+   if (reservoirFlowSensor.shouldCalculate(mainReservoirCheckInterval)) {
+        reservoirFlowSensor.calculate();
+   }
    if (currentMillis - mainReservoirStatusMillis >= mainReservoirCheckInterval)
    {
       mainReservoirStatusMillis = currentMillis;
       mainReservoirInletValve.checkReservoirLevel();
+      mainInletValveflowRate = reservoirFlowSensor.getFlowRateLitresPerMinute();
+
+      if (!mainReservoirInletValve.isValveOpen()) {
+         mainInletValveflowRate = 0.0f;
+      }
    }
+
    readCommands();
    dutchBucketScale.updateCalibration();
    ebbFlowScale.updateCalibration();
+   
    if (currentMillis - getAuxReservoirWeightMillis >= auxReservoirWeightInterval)
    {
       checkDutchBucketReservoirLevel();
@@ -139,35 +162,34 @@ void readCommands()
    {
       String cmd = Serial2.readStringUntil('\n');
       cmd.trim();
-
       if (cmd == "STATUS")
       {
          sendStatus();
       }
-      else if (cmd == "OPENMAINVALVE")
+      else if (cmd == "OPEN_MAIN_VALVE")
       {
          mainReservoirInletValve.openValve();
       }
-      else if (cmd == "CLOSEMAINVALVE")
+      else if (cmd == "CLOSE_MAIN_VALVE")
       {
          mainReservoirInletValve.closeValve();
       }
-      else if (cmd == "STARTDBSCALECAL")
+      else if (cmd == "START_DB_SCALECAL")
       {
          Serial2.println("CAL,DUTCH_BUCKET,START");
          dutchBucketScale.beginCalMode();
       }
-      else if (cmd == "STOPDBSCALECAL")
+      else if (cmd == "STOP_DB_SCALECAL")
       {
          Serial2.println("CAL,DUTCH_BUCKET,STOP");
          dutchBucketScale.endCalMode();
       }
-      else if (cmd == "STARTEFSCALECAL")
+      else if (cmd == "START_EF_SCALECAL")
       {
          Serial2.println("CAL,EBB_FLOW,START");
          ebbFlowScale.beginCalMode();
       }
-      else if (cmd == "STOPEFSCALECAL")
+      else if (cmd == "STOP_EF_SCALECAL")
       {
          Serial2.println("CAL,EBB_FLOW,STOP");
          ebbFlowScale.endCalMode();
@@ -237,5 +259,7 @@ void sendStatus()
    Serial2.print(",EF_Weight=");
    Serial2.print(lastEbbFlowWeight);
    Serial2.print(",EF_IV_O=");
-   Serial2.println(ebbFlowInletValveOpen);
+   Serial2.print(ebbFlowInletValveOpen);
+   Serial2.print(",MR_IV_Flow=");
+   Serial2.println(mainInletValveflowRate, 2);
 }
