@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <ValveControl.h>
-#include <Scale.h>
+#include <ReservoirScale.h>
 #include <PwmControl.h>
 #include <NutrientPumpController.h>
 #include <WaterFlowSensor.h>
@@ -12,13 +12,13 @@ const short FLORA_BLOOM_PUMP_PIN = 4;
 const short PH_DOWN_PUMP_PIN = 5;
 //Digital
 const short RESERVOIR_FLOW_SENSOR_PIN = 19; // FS300A flow sensor input pin
-const short RESERVOIR_BOTTOM_SENSOR_PIN = 22;
-const short RESERVOIR_TOP_SENSOR_PIN = 23;
+const short RESERVOIR_BOTTOM_SENSOR_PIN = 42;
+const short RESERVOIR_TOP_SENSOR_PIN = 43;
 
 const short DB_SCALE_DOUT_PIN = 24;
 const short DB_SCALE_SCK_PIN = 25;
-const short EF_SCALE_DOUT_PIN = 26;
-const short EF_SCALE_SCK_PIN = 27;
+const short EF_SCALE_DOUT_PIN = 40;
+const short EF_SCALE_SCK_PIN = 41;
 
 const short RESERVOIR_INLET_VALVE_PIN = 28;
 const short DB_INLET_VALVE_PIN = 29; // Pin 2 on relay board
@@ -30,7 +30,7 @@ const float RESERVOIR_FLOW_PULSES_PER_LITRE = 60.0f;
 
 const long dbScaleCalibrationFactor = 20000;
 const long dbScaleZeroFactor = 0;
-const long efScaleCalibrationFactor = 25000;
+const float efScaleCalibrationFactor = 400.0;
 const long efScaleZeroFactor = 0;
 const unsigned long MAX_NUTRIENT_PUMP_RUN_MS = 60000UL; // 60 seconds
 
@@ -38,7 +38,7 @@ unsigned long currentMillis;
 unsigned long mainReservoirStatusMillis;
 unsigned long getAuxReservoirWeightMillis;
 static const unsigned long auxReservoirWeightInterval = 5000UL;  // 5 seconds
-static const unsigned long mainReservoirCheckInterval = 10000UL; // 10 seconds
+static const unsigned long mainReservoirCheckInterval = 3000UL; // 10 seconds
 float lastDutchBucketWeight = 0.0;
 float lastEbbFlowWeight = 0.0;
 float auxReservoirMinWeight = 0.0;
@@ -55,10 +55,9 @@ NutrientPumpController nutrientPumps(floraGrowPump, floraMicroPump, floraBloomPu
 ReservoirInletValve mainReservoirInletValve(RESERVOIR_INLET_VALVE_PIN, RESERVOIR_TOP_SENSOR_PIN, RESERVOIR_BOTTOM_SENSOR_PIN);
 ReservoirInletValve dutchBucketInletValve(DB_INLET_VALVE_PIN);
 ReservoirInletValve ebbFlowInletValve(EF_INLET_VALVE_PIN);
-Scale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, dbScaleCalibrationFactor, dbScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 0, 1);
-Scale ebbFlowScale(EF_SCALE_DOUT_PIN, EF_SCALE_SCK_PIN, efScaleCalibrationFactor, efScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 8, 1);
+ReservoirScale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, dbScaleCalibrationFactor, dbScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 0, 1);
+ReservoirScale ebbFlowScale(EF_SCALE_DOUT_PIN, EF_SCALE_SCK_PIN, efScaleCalibrationFactor, efScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 8, 1);
 WaterFlowSensor reservoirFlowSensor(RESERVOIR_FLOW_SENSOR_PIN, RESERVOIR_FLOW_PULSES_PER_LITRE);
-
 void sendStatus();
 void readCommands();
 void checkDutchBucketReservoirLevel();
@@ -67,27 +66,28 @@ void checkEbbFlowReservoirLevel();
 void setup()
 {
    Serial.begin(115200);  // USB debug
-   Serial2.begin(115200); // ESP32 link
+   Serial2.begin(9600); // ESP32 link
+   Serial2.setTimeout(50);
 
    floraGrowPump.begin();
    floraMicroPump.begin();
    floraBloomPump.begin();
+   phDownPump.begin();
    nutrientPumps.begin();
 
    mainReservoirInletValve.begin();
    dutchBucketInletValve.begin();
-   dutchBucketScale.setupScale();
-   dutchBucketScale.begin();
+   //dutchBucketScale.begin();
    ebbFlowInletValve.begin();
-   ebbFlowScale.setupScale();
    ebbFlowScale.begin();
    reservoirFlowSensor.begin();
 }
 
 void loop()
 {
-   reservoirFlowSensor.update();
    currentMillis = millis();
+   reservoirFlowSensor.update();
+   
    reservoirFlowSensor.setActive(mainReservoirInletValve.isValveOpen());
    if (reservoirFlowSensor.shouldCalculate(mainReservoirCheckInterval)) {
         reservoirFlowSensor.calculate();
@@ -104,12 +104,12 @@ void loop()
    }
 
    readCommands();
-   dutchBucketScale.updateCalibration();
+   //dutchBucketScale.updateCalibration();
    ebbFlowScale.updateCalibration();
    
    if (currentMillis - getAuxReservoirWeightMillis >= auxReservoirWeightInterval)
    {
-      checkDutchBucketReservoirLevel();
+      //checkDutchBucketReservoirLevel();
       checkEbbFlowReservoirLevel();
       getAuxReservoirWeightMillis = currentMillis;
    }
@@ -162,6 +162,7 @@ void readCommands()
    {
       String cmd = Serial2.readStringUntil('\n');
       cmd.trim();
+
       if (cmd == "STATUS")
       {
          sendStatus();
@@ -174,24 +175,43 @@ void readCommands()
       {
          mainReservoirInletValve.closeValve();
       }
+      else if (cmd == "OPEN_DB_VALVE")
+      {
+         dutchBucketInletValve.openValve();
+      }
+      else if (cmd == "CLOSE_DB_VALVE")
+      {
+         dutchBucketInletValve.closeValve();
+      }
+      else if (cmd == "OPEN_EF_VALVE")
+      {
+         ebbFlowInletValve.openValve();
+      }
+      else if (cmd == "CLOSE_EF_VALVE")
+      {
+         ebbFlowInletValve.closeValve();
+      }
       else if (cmd == "START_DB_SCALECAL")
       {
-         Serial2.println("CAL,DUTCH_BUCKET,START");
          dutchBucketScale.beginCalMode();
       }
       else if (cmd == "STOP_DB_SCALECAL")
       {
-         Serial2.println("CAL,DUTCH_BUCKET,STOP");
          dutchBucketScale.endCalMode();
       }
       else if (cmd == "START_EF_SCALECAL")
       {
-         Serial2.println("CAL,EBB_FLOW,START");
          ebbFlowScale.beginCalMode();
       }
-      else if (cmd == "STOP_EF_SCALECAL")
+      else if (cmd.startsWith("CAL_FACTOR_EF_SCALE"))
       {
-         Serial2.println("CAL,EBB_FLOW,STOP");
+         String payload = cmd.substring(20); // drop "CAL_FACTOR_EF_SCALE,"
+         Serial.println("Setting EF scale calibration factor to: " + payload);
+         long calibrationFactor = payload.toInt();
+         ebbFlowScale.setCalibrationFactor(calibrationFactor);
+      }
+       else if (cmd == "STOP_EF_SCALECAL")
+      {
          ebbFlowScale.endCalMode();
       }
       else if (cmd.startsWith("CAL_NUTRIENT_PUMP"))

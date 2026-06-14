@@ -5,15 +5,15 @@ ReservoirInletValve::ReservoirInletValve(uint8_t inletPin, uint8_t topSensorPin,
     _topSensorPin(topSensorPin),
     _bottomSensorPin(bottomSensorPin),
     _previousMillis(0),
-    _fillValveOpen(false),
     _debounceIntervalMs(intervalMs),
-    _topSensorStableState(HIGH),
-    _topSensorLastReading(HIGH),
+    _fillValveOpen(false),
+    _reservoirEmpty(false),
+    _topSensorStableState(LOW),
+    _topSensorLastReading(LOW),
     _topSensorLastChangeTime(0),
-    _bottomSensorStableState(HIGH),
-    _bottomSensorLastReading(HIGH),
+    _bottomSensorStableState(LOW),
     _bottomSensorLastChangeTime(0),
-    _reservoirEmpty(false)
+    _bottomSensorLastReading(LOW)
 {
 }
 
@@ -22,15 +22,15 @@ ReservoirInletValve::ReservoirInletValve(uint8_t inletPin, unsigned long interva
     _topSensorPin(0xFF),
     _bottomSensorPin(0xFF),
     _previousMillis(0),
-    _fillValveOpen(false),
     _debounceIntervalMs(intervalMs),
+    _fillValveOpen(false),
+    _reservoirEmpty(false),
     _topSensorStableState(HIGH),
     _topSensorLastReading(HIGH),
     _topSensorLastChangeTime(0),
     _bottomSensorStableState(HIGH),
-    _bottomSensorLastReading(HIGH),
     _bottomSensorLastChangeTime(0),
-    _reservoirEmpty(false)
+    _bottomSensorLastReading(HIGH)
 {
 }
 
@@ -38,8 +38,8 @@ void ReservoirInletValve::begin() {
   pinMode(_inletPin, OUTPUT);
   // Only configure sensors if they are configured (not 0xFF)
   if (_topSensorPin != 0xFF && _bottomSensorPin != 0xFF) {
-    pinMode(_topSensorPin, INPUT);
-    pinMode(_bottomSensorPin, INPUT);
+    pinMode(_topSensorPin, INPUT_PULLUP);
+    pinMode(_bottomSensorPin, INPUT_PULLUP);
   }
   closeValve();
 }
@@ -76,13 +76,13 @@ void ReservoirInletValve::checkReservoirLevel() {
   int topValue = debouncedRead(_topSensorPin, _topSensorStableState, _topSensorLastReading, _topSensorLastChangeTime);
   int bottomValue = debouncedRead(_bottomSensorPin, _bottomSensorStableState, _bottomSensorLastReading, _bottomSensorLastChangeTime);
 
-  if (topValue == LOW && bottomValue == HIGH) {
+  if (topValue == HIGH && bottomValue == LOW) {
     // Reservoir is empty, open the valve if it's not already open
     _reservoirEmpty = true;
     if (!_fillValveOpen) {
       openValve();
     }
-  } else if (topValue == HIGH && bottomValue == LOW) {
+  } else if (topValue == LOW && bottomValue == HIGH) {
     _reservoirEmpty = false;
     // Reservoir is full, close the valve if it's not already closed
     if (_fillValveOpen) {

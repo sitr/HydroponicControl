@@ -20,9 +20,9 @@ class ReservoirInletValve {
     uint8_t _topSensorPin;
     uint8_t _bottomSensorPin;
     unsigned long _previousMillis;
+    unsigned long _debounceIntervalMs;
     bool _fillValveOpen;
     bool _reservoirEmpty;
-    unsigned long _debounceIntervalMs;
 
     // Debouncing variables for top sensor
     int _topSensorStableState;
@@ -31,8 +31,8 @@ class ReservoirInletValve {
 
     // Debouncing variables for bottom sensor
     int _bottomSensorStableState;
-    int _bottomSensorLastReading;
     unsigned long _bottomSensorLastChangeTime;
+    int _bottomSensorLastReading;
 
     static const unsigned long DEBOUNCE_DELAY_MS = 50UL;
 
