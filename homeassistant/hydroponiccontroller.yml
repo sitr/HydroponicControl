@@ -29,13 +29,24 @@ globals:
   - id: last_alive_ms
     type: unsigned long
     restore_value: no
-    initial_value: '0'
+    initial_value: '0'  
+    
+  - id: ef_valve_open
+    type: bool
+    restore_value: yes
+    initial_value: 'false'
+
+  - id: db_valve_open
+    type: bool
+    restore_value: yes
+    initial_value: 'false'    
+  
     
 uart:
   id: arduino_mega_uart
   tx_pin: GPIO01   # TX
   rx_pin: GPIO03   # RX
-  baud_rate: 115200
+  baud_rate: 9600
   parity: NONE
   stop_bits: 1
 
@@ -47,7 +58,6 @@ uart:
     sequence:
       - lambda: |-
           std::string line(bytes.begin(), bytes.end());
-
           while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
             line.pop_back();
           }
@@ -56,131 +66,171 @@ uart:
             id(last_alive_ms) = millis();
           }
 
-          if (line.find("STAT,") == 0) {
-            int mainReservoirEmpty = 0;
-            int mainInletValveOpen = 0;
-            float dutchBucketReservoirWeight = 0.0f;
-            int dutchBucketInletValveOpen = 0;
-            int dutchBucketReservoirEmpty = 0;
-            float ebbFlowReservoirWeight = 0.0f;
-            int ebbFlowInletValveOpen = 0;
-            int ebbFlowReservoirEmpty = 0;
-            int scaleIsCalibrating = 0;
+          if (line.find("DB_VALVE,") == 0) {
+            std::string db_valve_status = line.substr(9);
+            if(db_valve_status == "OPEN") {
+              id(db_valve_open) = true;
+              id(db_valve_state).publish_state(true);
+            }
+            else if(db_valve_status == "CLOSED") {
+              id(db_valve_open) = false;
+              id(db_valve_state).publish_state(false);
+            }
+          }
 
-            int matched = sscanf(
-              line.c_str(),
-              "STAT,M_R_Empty=%d,MI_IV_O=%d,DB_Weight=%f,DB_IV_O=%d,DB_R_Empty=%d,EF_Weight=%f,EF_IV_O=%d,EF_R_Empty=%d[^,\r\n]",
-              &mainReservoirEmpty, 
-              &mainInletValveOpen, 
-              &dutchBucketReservoirWeight, 
-              &dutchBucketInletValveOpen, 
-              &dutchBucketReservoirEmpty, 
-              &ebbFlowReservoirWeight, 
-              &ebbFlowInletValveOpen, 
-              &ebbFlowReservoirEmpty
-            );
-            id(status_debug).publish_state(line);
-            id(main_reservoir_empty).publish_state(mainReservoirEmpty);
-            id(main_inlet_valve_status).publish_state(mainInletValveOpen);
-            id(dutch_bucket_reservoir_weight).publish_state(dutchBucketReservoirWeight);
-            id(dutch_bucket_inlet_valve_status).publish_state(dutchBucketInletValveOpen);
-            id(dutch_bucket_reservoir_empty).publish_state(dutchBucketReservoirEmpty);
-            id(ebb_flow_reservoir_weight).publish_state(ebbFlowReservoirWeight);
-            id(ebb_flow_inlet_valve_status).publish_state(ebbFlowInletValveOpen);
-            id(ebb_flow_reservoir_empty).publish_state(ebbFlowReservoirEmpty);
+          if (line.find("EF_VALVE,") == 0) {
+            std::string ef_valve_status = line.substr(9);
+            if(ef_valve_status == "OPEN") {
+              id(ef_valve_open) = true;
+              id(ef_valve_state).publish_state(true);
+            }
+            else if(ef_valve_status == "CLOSED") {
+              id(ef_valve_open) = false;
+              id(ef_valve_state).publish_state(false);
+            }
           }
 
           // Handle CAL messages
-          if (line.find("CAL,DutchBucket,") == 0) {
-            id(scale_is_calibrating).publish_state(1);
-            std::string cal_data = line.substr(16); // Remove "CAL,DutchBucket,"
+          if (line.find("CAL,NUTRIENT_PUMP,") == 0) {
+            std::string cal_data = line.substr(18); // Remove "CAL,NUTRIENT_PUMP,";
+            if (cal_data == "COMPLETE") {
+              id(set_pump_calibration_status_off).execute();
+            }
+          }
+
+          if (line.find("CAL,SCALE,") == 0) {
+            id(ef_scale_is_calibrating).publish_state(1);
+            std::string cal_data = line.substr(10); // Remove "CAL,SCALE,"
             
-            if (cal_data == "start") {
-              id(calibration_status).publish_state("Starting");
+            if (cal_data == "START") {
+              id(calibration_status).publish_state("Starter");
             } 
-            else if (cal_data == "taring") {
-              id(calibration_status).publish_state("Taring");
+            else if (cal_data == "TARING") {
+              id(calibration_status).publish_state("Nullstiller");
             } 
-            else if (cal_data == "zero_applied") {
-              id(calibration_status).publish_state("Zero applied");
+            else if (cal_data == "ZERO_APPLIED") {
+              id(calibration_status).publish_state("Nullpunkt funnet");
             } 
-            else if (cal_data == "active") {
-              id(calibration_status).publish_state("Active");
+            else if (cal_data == "ACTIVE") {
+              id(calibration_status).publish_state("Aktiv");
             } 
-            else if (cal_data == "stop") {
-              id(calibration_status).publish_state("Idle");
-              id(scale_is_calibrating).publish_state(0);
+            else if (cal_data == "STOP") {
+              id(calibration_status).publish_state("Inaktiv");
+              id(ef_scale_is_calibrating).publish_state(0);
 
             } 
-            else if (cal_data.find("weight=") == 0) {
+            else if (cal_data.find("WEIGHT=") == 0) {
               // Live weight reading during calibration
               float weight = 0.0;
-              if (sscanf(cal_data.c_str(), "weight=%f", &weight) == 1) {
+              if (sscanf(cal_data.c_str(), "WEIGHT=%f", &weight) == 1) {
                 id(calibration_weight).publish_state(weight);
               }
             }
             return;
           }
 
+          if (line.find("STAT,") == 0) {
+            char mainReservoirStatus[8] = {0};
+            int mainInletValveOpen = 0;
+            float dutchBucketReservoirWeight = 0.0f;
+            int dutchBucketInletValveOpen = 0;
+            int dutchBucketReservoirEmpty = 0;
+            int dutchBuckeNutrientValveOpen = 0;
+            float ebbFlowReservoirWeight = 0.0f;
+            int ebbFlowInletValveOpen = 0;
+            int ebbFlowReservoirEmpty = 0;
+            int ebbFlowNutrientValveOpen=0;
+            int scaleIsCalibrating = 0;
+            float mainReservoirFlowRate = 0.0f;
+
+            int matched = sscanf(
+              line.c_str(),
+              "STAT,MR_Status=%10[^,],MR_IV_O=%d,DB_Weight=%f,DB_IV_O=%d,EF_Weight=%f,EF_IV_O=%d,MR_IV_Flow=%f,EF_NV_O=%d,DB_NV_O=%d",
+              mainReservoirStatus, 
+              &mainInletValveOpen, 
+              &dutchBucketReservoirWeight, 
+              &dutchBucketInletValveOpen, 
+              &ebbFlowReservoirWeight, 
+              &ebbFlowInletValveOpen,
+              &mainReservoirFlowRate,
+              &ebbFlowNutrientValveOpen,
+              &dutchBucketNutrientValveOpen
+            );
+            if (matched == 9) {
+              id(main_reservoir_status).publish_state(mainReservoirStatus);
+              id(main_inlet_valve_status).publish_state(mainInletValveOpen);
+              id(dutch_bucket_reservoir_weight).publish_state(dutchBucketReservoirWeight);
+              id(dutch_bucket_inlet_valve_status).publish_state(dutchBucketInletValveOpen);
+              id(ebb_flow_reservoir_weight).publish_state(ebbFlowReservoirWeight);
+              id(ebb_flow_inlet_valve_status).publish_state(ebbFlowInletValveOpen);
+              id(main_reservoir_flow_rate).publish_state(mainReservoirFlowRate);
+              id(ebb_flow_nutrient_valve_status).publish_state(ebbFlowNutrientValveOpen);
+              id(dutch_bucket_nutrient_valve_status).publish_state(dutchBucketNutrientValveOpen);
+            }
+            else {
+              ESP_LOGW("uart", "STAT parse failed, matched=%d, line=%s", matched, line.c_str());
+            }
+          }
+            
+
+script:
+  - id: set_pump_calibration_status_on
+    then:
+      - homeassistant.service:
+          service: input_boolean.turn_on
+          data:
+            entity_id: input_boolean.drivhus_pumpekalibrering_pagar
+
+  - id: set_pump_calibration_status_off
+    then:
+      - homeassistant.service:
+          service: input_boolean.turn_off
+          data:
+            entity_id: input_boolean.drivhus_pumpekalibrering_pagar
+
 text_sensor:
   - platform: template
-    name: "Main reservoir status"
-    icon: mdi:barrel
-    lambda: |-
-      if (id(main_reservoir_empty).state) {
-        return {"Full"};
-      } else {
-        return {"Empty"};
-      }
-    update_interval: 10s
-
-  - platform: template
-    name: "Dutch bucket reservoir status"
-    icon: mdi:cup-outline
-    lambda: |-
-      if (id(dutch_bucket_reservoir_empty).state) {
-        return {"Full"};
-      } else {
-        return {"Empty"};
-      }
-    update_interval: 10s
-
-  - platform: template
-    name: "Ebb flow reservoir status"
-    icon: mdi:cup-outline
-    lambda: |-
-      if (id(ebb_flow_reservoir_empty).state) {
-        return {"Full"};
-      } else {
-        return {"Empty"};
-      }
-    update_interval: 10s   
-
-  - platform: template
-    name: "Calibration Status"
+    name: "Kalibreringsstatus"
     id: calibration_status
     lambda: |-
-      return {"Idle"};
+      return {"Inaktiv"};
 
   - platform: template
-    name: "Status debug"
-    id: status_debug
+    name: "Hovedreservoar status"
+    id: main_reservoir_status
+    icon: mdi:barrel
 
 sensor:
   - platform: template
-    name: "Dutch bucket reservoir weight"
+    name: "DB reservoarvekt"
     id: dutch_bucket_reservoir_weight
     unit_of_measurement: "kg"
     accuracy_decimals: 1
     icon: mdi:scale
 
   - platform: template
-    name: "Ebb flow reservoir weight"
+    name: "EF reservoarvekt"
     id: ebb_flow_reservoir_weight
     unit_of_measurement: "kg"
     accuracy_decimals: 1
     icon: mdi:scale
 
+  - platform: template
+    name: "Hovedservoar strømningshastighet"
+    id: main_reservoir_flow_rate
+    unit_of_measurement: "L/min"
+    accuracy_decimals: 2
+    state_class: measurement
+    icon: mdi:waves-arrow-right
+
+  - platform: homeassistant
+    id: ef_valve_state
+    entity_id: binary_sensor.hydroponic_kontroller_ef_inntaksventil_status
+
+  - platform: homeassistant
+    id: db_valve_state
+    entity_id: binary_sensor.hydroponic_kontroller_db_inntaksventil_status
+    
   - platform: homeassistant
     id: aux_reservoir_min_volume
     entity_id: input_number.aux_reservoir_min_volume
@@ -189,15 +239,66 @@ sensor:
     id: aux_reservoir_max_volume
     entity_id: input_number.aux_reservoir_max_volume
 
+  - platform: homeassistant
+    id: dosing_flora_grow
+    entity_id: input_number.drivhus_floragrow_dosering
+
+  - platform: homeassistant
+    id: dosing_flora_bloom
+    entity_id: input_number.drivhus_florabloom_dosering
+
+  - platform: homeassistant
+    id: dosing_flora_micro
+    entity_id: input_number.drivhus_floramicro_dosering
+
+  - platform: homeassistant
+    id: dosing_ph
+    entity_id: input_number.drivhus_ph_dosering
+    
   - platform: template
-    name: "Calibration Weight"
+    name: "Kalibreringsvekt"
     id: calibration_weight
     unit_of_measurement: "kg"
     accuracy_decimals: 1
 
+  - platform: homeassistant
+    id: nutrient_pump_calibration_time
+    entity_id: input_number.drivhus_kalibreringstid_gjodningspumper
+    internal: True
+
+  - platform: homeassistant
+    id: nutrient_pump_floragrow_speed
+    entity_id: input_number.drivhus_floragrow_pumpehastighet
+    internal: True
+
+  - platform: homeassistant
+    id: nutrient_pump_floramicro_speed
+    entity_id: input_number.drivhus_floramicro_pumpehastighet
+    internal: True
+
+  - platform: homeassistant
+    id: nutrient_pump_florabloom_speed
+    entity_id: input_number.drivhus_florabloom_pumpehastighet
+    internal: True
+
+  - platform: homeassistant
+    id: nutrient_pump_ph_speed
+    entity_id: input_number.drivhus_ph_pumpehastighet
+    internal: True
+
+  - platform: homeassistant
+    id: ef_calibration_factor
+    entity_id: input_number.drivhus_ef_kalibreringsfaktor
+    internal: True
+
+  - platform: homeassistant
+    id: db_calibration_factor
+    entity_id: input_number.drivhus_db_kalibreringsfaktor
+    internal: True
+
 binary_sensor:
   - platform: template
-    name: "Mega Alive"
+    name: "Kontrollerstatus"
     id: mega_alive
     lambda: |-
       return (millis() - id(last_alive_ms)) < 15000;
@@ -210,20 +311,32 @@ binary_sensor:
     device_class: moisture
 
   - platform: template
-    name: "Main inlet valve status"
+    name: "Hovedinntaksventil"
     id: main_inlet_valve_status
     device_class: opening
     icon: mdi:pipe-valve
 
   - platform: template
-    name: "Dutch bucket inlet valve status"
+    name: "DB inntaksventil"
     id: dutch_bucket_inlet_valve_status
     device_class: opening
     icon: mdi:pipe-valve
 
   - platform: template
-    name: "Ebb flow inlet valve status"
+    name: "EF inntaksventil"
     id: ebb_flow_inlet_valve_status
+    device_class: opening
+    icon: mdi:pipe-valve
+
+  - platform: template
+    name: "EF gjødrningsventil"
+    id: ebb_flow_nutrient_valve_status
+    device_class: opening
+    icon: mdi:pipe-valve
+
+  - platform: template
+    name: "DB gjødrningsventil"
+    id: dutch_bucket_nutrient_valve_status
     device_class: opening
     icon: mdi:pipe-valve
 
@@ -239,39 +352,150 @@ binary_sensor:
       - invert:
     device_class: moisture
 
-  - platform: template
-    name: "Scale is calibrating"
-    id: scale_is_calibrating
-    icon: mdi:knob
-    lambda: |-
-      return false;
+  - platform: homeassistant
+    name: "EF vektkalibrering pågår"
+    id: ef_scale_is_calibrating
+    entity_id: input_boolean.drivhus_ef_vektkalibrering_pagar_helper
+    internal: True
+
+  - platform: homeassistant
+    name: "DB vektkalibrering pågår"
+    id: db_scale_is_calibrating
+    entity_id: input_boolean.drivhus_ef_vektkalibrering_pagar_helper
+    internal: True
+
+  - platform: homeassistant
+    id: nutrient_pump_is_calibrating
+    entity_id: input_boolean.drivhus_pumpekalibrering_pagar
+    internal: True
 
 switch:
   - platform: template
-    name: "Main valve"
+    name: "Hovedinntaksventil"
     optimistic: true
     turn_on_action: 
-      - uart.write: "OPENMAINVALVE"
+      - uart.write: "OPEN_MAIN_VALVE\r\n"
     turn_off_action: 
-      - uart.write: "CLOSEMAINVALVE"
+      - uart.write: "CLOSE_MAIN_VALVE\r\n"
 
   - platform: template
-    name: "Calibrate DB scale"
+    name: "EF inntaksventil"
+    id: "ef_valve"
+    optimistic: true
+    lambda: |-
+      return id(ef_valve_open);
+    turn_on_action: 
+      - uart.write: "OPEN_EF_VALVE\r\n"
+    turn_off_action: 
+      - uart.write: "CLOSE_EF_VALVE\r\n"
+
+  - platform: template
+    name: "DB inntaksventil"
+    id: "db_valve"
+    optimistic: true
+    lambda: |-
+      return id(db_valve_open);
+    turn_on_action: 
+      - uart.write: "OPEN_DB_VALVE\r\n"
+    turn_off_action: 
+      - uart.write: "CLOSE_DB_VALVE\r\n"
+
+  - platform: template
+    name: "EF gjødningsventil"
+    id: "ef_nutrient_valve"
+    optimistic: true
+    turn_on_action: 
+      - uart.write: "OPEN_NUTRIENT_VALVE,EF"
+    turn_off_action: 
+      - uart.write: "CLOSE_NUTRIENT_VALVE,EF"
+
+  - platform: template
+    name: "DB gjødningsventil"
+    id: "db_nutrient_valve"
+    optimistic: true
+    turn_on_action: 
+      - uart.write: "OPEN_NUTRIENT_VALVE,DB"
+    turn_off_action: 
+      - uart.write: "CLOSE_NUTRIENT_VALVE,DB"
+        
+  - platform: template
+    name: "Kalibrer DB vekt"
     icon: mdi:knob
     optimistic: true
     turn_on_action:
-      - uart.write: "STARTDBSCALECAL"
+      - uart.write: "START_DB_SCALECAL\r\n"
     turn_off_action:
-      - uart.write: "STOPDBSCALECAL"
+      - uart.write: "STOP_DB_SCALECAL\r\n"
 
   - platform: template
-    name: "Calibrate EF scale"
+    name: "Kalibrer EF vekt"
     icon: mdi:knob
     optimistic: true
     turn_on_action:
-      - uart.write: "STARTEFSCALECAL"
+      - uart.write: "START_EF_SCALECAL"
     turn_off_action:
-      - uart.write: "STOPEFSCALECAL"
+      - uart.write: "STOP_EF_SCALECAL\r\n"
+
+button:
+  - platform: template
+    name: "Kalibrer FloraGrow pumpe"
+    icon: mdi:pump
+    on_press:
+      - homeassistant.service:
+          service: input_boolean.turn_on
+          data:
+            entity_id: input_boolean.drivhus_pumpekalibrering_pagar
+      - uart.write:
+          data: !lambda |-
+            int time = (int) id(nutrient_pump_calibration_time).state * 1000;
+            int speed = (int) id(nutrient_pump_floragrow_speed).state;
+            std::string message = str_sprintf("CAL_NUTRIENT_PUMP,FLORA_GROW,%d,%d\r\n", time, speed);
+            return std::vector<uint8_t>(message.begin(), message.end());
+
+  - platform: template
+    name: "Kalibrer FloraMicro pumpe"
+    icon: mdi:pump
+    on_press:
+      - homeassistant.service:
+          service: input_boolean.turn_on
+          data:
+            entity_id: input_boolean.drivhus_pumpekalibrering_pagar
+      - uart.write:
+          data: !lambda |-
+            int time = (int) id(nutrient_pump_calibration_time).state * 1000;
+            int speed = (int) id(nutrient_pump_floramicro_speed).state;
+            std::string message = str_sprintf("CAL_NUTRIENT_PUMP,FLORA_MICRO,%d,%d\r\n", time, speed);
+            return std::vector<uint8_t>(message.begin(), message.end());
+
+  - platform: template
+    name: "Kalibrer FloraBloom pumpe"
+    icon: mdi:pump
+    on_press:
+      - homeassistant.service:
+          service: input_boolean.turn_on
+          data:
+            entity_id: input_boolean.drivhus_pumpekalibrering_pagar
+      - uart.write:
+          data: !lambda |-
+            int time = (int) id(nutrient_pump_calibration_time).state * 1000;
+            int speed = (int) id(nutrient_pump_florabloom_speed).state;
+            std::string message = str_sprintf("CAL_NUTRIENT_PUMP,FLORA_BLOOM,%d,%d\r\n", time, speed);
+            return std::vector<uint8_t>(message.begin(), message.end());
+
+  - platform: template
+    name: "Kalibrer pH pumpe"
+    icon: mdi:pump
+    on_press:
+      - homeassistant.service:
+          service: input_boolean.turn_on
+          data:
+            entity_id: input_boolean.drivhus_pumpekalibrering_pagar
+      - uart.write:
+          data: !lambda |-
+            int time = (int) id(nutrient_pump_calibration_time).state * 1000;
+            int speed = (int) id(nutrient_pump_ph_speed).state;
+            std::string message = str_sprintf("CAL_NUTRIENT_PUMP,PH_DOWN,%d,%d\r\n", time, speed);
+            return std::vector<uint8_t>(message.begin(), message.end());
 
 interval:
   - interval: 5s
@@ -279,20 +503,58 @@ interval:
       - if:
           condition:
             lambda: |-
-              return !id(scale_is_calibrating).state;
+              return id(ef_scale_is_calibrating).state;
           then:
-            - uart.write: "STATUS"
+            - uart.write:
+                data: !lambda |-
+                  int calibrationFactor = (int) id(ef_calibration_factor).state;
+                  std::string message = str_sprintf("CAL_FACTOR_EF_SCALE,%d\r\n", calibrationFactor);
+                  return std::vector<uint8_t>(message.begin(), message.end());
 
-  - interval: 10s
+  - interval: 5s
     then:
-      - uart.write:
-          data: !lambda |-
-            int min_vol = (int) id(aux_reservoir_min_volume).state;
-            int max_vol = (int) id(aux_reservoir_max_volume).state;
+      - if:
+          condition:
+            lambda: |-
+              return id(db_scale_is_calibrating).state;
+          then:
+            - uart.write:
+                data: !lambda |-
+                  int calibrationFactor = (int) id(db_calibration_factor).state;
+                  std::string message = str_sprintf("CAL_FACTOR_DB_SCALE,%d\r\n", calibrationFactor);
+                  return std::vector<uint8_t>(message.begin(), message.end());
 
-            std::string message = str_sprintf(
-              "AUX_RESERVOIR_CONFIG,%d,%d\r\n",
-              min_vol,
-              max_vol
-            );
-            return std::vector<uint8_t>(message.begin(), message.end());
+  - interval: 5s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !id(ef_scale_is_calibrating).state && !id(db_scale_is_calibrating).state && !id(nutrient_pump_is_calibrating).state;
+          then:
+            - uart.write: "STATUS\r\n"
+
+  - interval: 22s
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !id(ef_scale_is_calibrating).state && !id(db_scale_is_calibrating).state && !id(nutrient_pump_is_calibrating).state;
+          then:
+            - uart.write:
+                data: !lambda |-
+                  int min_vol = (int) id(aux_reservoir_min_volume).state;
+                  int max_vol = (int) id(aux_reservoir_max_volume).state;
+                  int dosing_flora_grow = (int) id(dosing_flora_grow).state;
+                  int dosing_flora_bloom = (int) id(dosing_flora_bloom).state;
+                  int dosing_flora_micro = (int) id(dosing_flora_micro).state;
+                  float dosing_ph = (float) id(dosing_ph).state;
+                  std::string message = str_sprintf(
+                    "CONFIG,%d,%d,%d,%d,%d,%f\r\n",
+                    min_vol,
+                    max_vol,
+                    dosing_flora_grow,
+                    dosing_flora_bloom,
+                    dosing_flora_micro,
+                    dosing_ph
+                  );
+                  return std::vector<uint8_t>(message.begin(), message.end());
