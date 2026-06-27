@@ -75,14 +75,17 @@ void ReservoirInletValve::checkReservoirLevel() {
 
   int topValue = debouncedRead(_topSensorPin, _topSensorStableState, _topSensorLastReading, _topSensorLastChangeTime);
   int bottomValue = debouncedRead(_bottomSensorPin, _bottomSensorStableState, _bottomSensorLastReading, _bottomSensorLastChangeTime);
-
-  if (topValue == HIGH && bottomValue == LOW) {
+//   Serial.print("Top sensor: ");
+//   Serial.print(topValue);
+//    Serial.print(", Bottom sensor: ");
+//    Serial.println(bottomValue);
+  if (topValue == LOW && bottomValue == HIGH) {
     // Reservoir is empty, open the valve if it's not already open
     _reservoirEmpty = true;
     if (!_fillValveOpen) {
       openValve();
     }
-  } else if (topValue == LOW && bottomValue == HIGH) {
+  } else if (topValue == HIGH && bottomValue == LOW) {
     _reservoirEmpty = false;
     // Reservoir is full, close the valve if it's not already closed
     if (_fillValveOpen) {
