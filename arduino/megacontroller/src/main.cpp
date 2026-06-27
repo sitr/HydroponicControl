@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <EEPROM.h>
 #include <ValveControl.h>
 #include <ReservoirScale.h>
 #include <PwmControl.h>
@@ -34,6 +35,10 @@ const float efScaleCalibrationFactor = 400.0;
 const long efScaleZeroFactor = 0;
 const unsigned long MAX_NUTRIENT_PUMP_RUN_MS = 60000UL; // 60 seconds
 
+static constexpr uint32_t CONFIG_EEPROM_MAGIC = 0x43464743; // "CFGC"
+static constexpr uint16_t CONFIG_EEPROM_VERSION = 1;
+static constexpr int CONFIG_EEPROM_ADDR = 200;
+
 unsigned long currentMillis;
 unsigned long mainReservoirStatusMillis;
 unsigned long getAuxReservoirWeightMillis;
@@ -44,6 +49,27 @@ float lastEbbFlowWeight = 0.0;
 float auxReservoirMinWeight = 0.0;
 float auxReservoirMaxWeight = 0.0;
 float mainInletValveflowRate = 0.0f;
+// Dosing configuration (set via CONFIG command: min,max,flora_grow,flora_bloom,flora_micro,ph)
+int floraGrowDosing = 0;
+int floraBloomDosing = 0;
+int floraMicroDosing = 0;
+float phDosing = 0.0f;
+
+struct ConfigData {
+   uint32_t magic;
+   uint16_t version;
+   float minWeight;
+   float maxWeight;
+   int32_t floraGrowDosing;
+   int32_t floraBloomDosing;
+   int32_t floraMicroDosing;
+   float phDosing;
+   uint16_t checksum;
+};
+
+uint16_t calculateConfigChecksum(const ConfigData &config);
+void loadControlConfig();
+void saveControlConfig();
 
 PwmControl floraGrowPump(FLORA_GROW_PUMP_PIN, false);
 PwmControl floraMicroPump(FLORA_MICRO_PUMP_PIN, false);
@@ -55,6 +81,8 @@ NutrientPumpController nutrientPumps(floraGrowPump, floraMicroPump, floraBloomPu
 ReservoirInletValve mainReservoirInletValve(RESERVOIR_INLET_VALVE_PIN, RESERVOIR_TOP_SENSOR_PIN, RESERVOIR_BOTTOM_SENSOR_PIN);
 ReservoirInletValve dutchBucketInletValve(DB_INLET_VALVE_PIN);
 ReservoirInletValve ebbFlowInletValve(EF_INLET_VALVE_PIN);
+ReservoirInletValve dutchBucketNutrientValve(DB_NUTRIENT_VALVE_PIN);
+ReservoirInletValve ebbFlowNutrientValve(EF_NUTRIENT_VALVE_PIN);
 ReservoirScale dutchBucketScale(DB_SCALE_DOUT_PIN, DB_SCALE_SCK_PIN, dbScaleCalibrationFactor, dbScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 0, 1);
 ReservoirScale ebbFlowScale(EF_SCALE_DOUT_PIN, EF_SCALE_SCK_PIN, efScaleCalibrationFactor, efScaleZeroFactor, auxReservoirMinWeight, auxReservoirMaxWeight, 8, 1);
 WaterFlowSensor reservoirFlowSensor(RESERVOIR_FLOW_SENSOR_PIN, RESERVOIR_FLOW_PULSES_PER_LITRE);
@@ -68,6 +96,8 @@ void setup()
    Serial.begin(115200);  // USB debug
    Serial2.begin(9600); // ESP32 link
    Serial2.setTimeout(50);
+
+   loadControlConfig();
 
    floraGrowPump.begin();
    floraMicroPump.begin();
@@ -178,22 +208,33 @@ void readCommands()
       else if (cmd == "OPEN_DB_VALVE")
       {
          dutchBucketInletValve.openValve();
+         Serial2.println("DB_VALVE,OPEN");
       }
       else if (cmd == "CLOSE_DB_VALVE")
       {
          dutchBucketInletValve.closeValve();
+         Serial2.println("DB_VALVE,CLOSED");
       }
       else if (cmd == "OPEN_EF_VALVE")
       {
          ebbFlowInletValve.openValve();
+         Serial2.println("EF_VALVE,OPEN");
       }
       else if (cmd == "CLOSE_EF_VALVE")
       {
          ebbFlowInletValve.closeValve();
+         Serial2.println("EF_VALVE,CLOSED");
       }
       else if (cmd == "START_DB_SCALECAL")
       {
          dutchBucketScale.beginCalMode();
+      }
+      else if (cmd.startsWith("CAL_FACTOR_DB_SCALE"))
+      {
+         String payload = cmd.substring(20);
+         Serial.println("Setting DB scale calibration factor to: " + payload);
+         long calibrationFactor = payload.toInt();
+         dutchBucketScale.setCalibrationFactor(calibrationFactor);
       }
       else if (cmd == "STOP_DB_SCALECAL")
       {
@@ -249,37 +290,122 @@ void readCommands()
             Serial2.println(nutrientPumpName);
          }
       }
-      else if (cmd.startsWith("AUX_RESERVOIR_CONFIG"))
+      else if (cmd.startsWith("CONFIG"))
       {
-         String payload = cmd.substring(21); // drop "AUX_RESERVOIR_CONFIG,"
+         String payload = cmd.substring(7); // drop "CONFIG,"
+         Serial.println("Received hydroponic controller config: " + payload);
+         // Expecting: minWeight,maxWeight,flora_grow_dosing,flora_bloom_dosing,flora_micro_dosing,ph_dosing
          int i1 = payload.indexOf(',');
          int i2 = payload.indexOf(',', i1 + 1);
-         auxReservoirMinWeight = payload.substring(i1 + 1, i2).toInt();
-         auxReservoirMaxWeight = payload.substring(i2 + 1).toInt();
+         int i3 = payload.indexOf(',', i2 + 1);
+         int i4 = payload.indexOf(',', i3 + 1);
+         int i5 = payload.indexOf(',', i4 + 1);
+
+         if (!(i1 > 0 && i2 > i1 && i3 > i2 && i4 > i3 && i5 > i4)) {
+            Serial.println("CONFIG: invalid payload, expected 6 comma-separated values");
+         }
+         else {
+            auxReservoirMinWeight = payload.substring(0, i1).toFloat();
+            auxReservoirMaxWeight = payload.substring(i1 + 1, i2).toFloat();
+            floraGrowDosing = payload.substring(i2 + 1, i3).toInt();
+            floraBloomDosing = payload.substring(i3 + 1, i4).toInt();
+            floraMicroDosing = payload.substring(i4 + 1, i5).toInt();
+            phDosing = payload.substring(i5 + 1).toFloat();
+            saveControlConfig();
+            Serial.print("Config set: min="); Serial.print(auxReservoirMinWeight);
+            Serial.print(", max="); Serial.print(auxReservoirMaxWeight);
+            Serial.print(", flora_grow="); Serial.print(floraGrowDosing);
+            Serial.print(", flora_bloom="); Serial.print(floraBloomDosing);
+            Serial.print(", flora_micro="); Serial.print(floraMicroDosing);
+            Serial.print(", ph="); Serial.println(phDosing);
+         }
       }
    }
 }
 
+uint16_t calculateConfigChecksum(const ConfigData &config)
+{
+   const uint8_t *data = reinterpret_cast<const uint8_t *>(&config);
+   uint16_t sum = 0;
+
+   for (size_t i = 0; i < sizeof(ConfigData) - sizeof(config.checksum); i++)
+   {
+      sum += data[i];
+   }
+
+   return sum;
+}
+
+void loadControlConfig()
+{
+   ConfigData config;
+   EEPROM.get(CONFIG_EEPROM_ADDR, config);
+
+   bool valid =
+      config.magic == CONFIG_EEPROM_MAGIC &&
+      config.version == CONFIG_EEPROM_VERSION &&
+      config.checksum == calculateConfigChecksum(config);
+
+   if (!valid)
+   {
+      Serial.println("No valid hydroponic config in EEPROM. Using default values.");
+      return;
+   }
+
+   auxReservoirMinWeight = config.minWeight;
+   auxReservoirMaxWeight = config.maxWeight;
+   floraGrowDosing = static_cast<int>(config.floraGrowDosing);
+   floraBloomDosing = static_cast<int>(config.floraBloomDosing);
+   floraMicroDosing = static_cast<int>(config.floraMicroDosing);
+   phDosing = config.phDosing;
+
+   Serial.print("Loaded hydroponic config from EEPROM: min="); Serial.print(auxReservoirMinWeight);
+   Serial.print(", max="); Serial.print(auxReservoirMaxWeight);
+   Serial.print(", flora_grow="); Serial.print(floraGrowDosing);
+   Serial.print(", flora_bloom="); Serial.print(floraBloomDosing);
+   Serial.print(", flora_micro="); Serial.print(floraMicroDosing);
+   Serial.print(", ph="); Serial.println(phDosing);
+}
+
+void saveControlConfig()
+{
+   ConfigData config;
+   memset(&config, 0, sizeof(config));
+   config.magic = CONFIG_EEPROM_MAGIC;
+   config.version = CONFIG_EEPROM_VERSION;
+   config.minWeight = auxReservoirMinWeight;
+   config.maxWeight = auxReservoirMaxWeight;
+   config.floraGrowDosing = floraGrowDosing;
+   config.floraBloomDosing = floraBloomDosing;
+   config.floraMicroDosing = floraMicroDosing;
+   config.phDosing = phDosing;
+   config.checksum = calculateConfigChecksum(config);
+
+   EEPROM.put(CONFIG_EEPROM_ADDR, config);
+   Serial.println("Saved hydroponic config to EEPROM.");
+}
+
 void sendStatus()
 {
-   int mainInletValveOpen = mainReservoirInletValve.isValveOpen() ? 1 : 0;
-   int dutchBucketInletValveOpen = dutchBucketInletValve.isValveOpen() ? 1 : 0;
-   int ebbFlowInletValveOpen = ebbFlowInletValve.isValveOpen() ? 1 : 0;
-
    // MR = Main Reservoir, IV = Inlet Valve, DB = Dutch Bucket, EF = Ebb & Flow, O = Open
+   // NV = Nutrient Valve
 
    Serial2.print("STAT,MR_Status=");
    Serial2.print(mainReservoirInletValve.getReservoirStatus());
    Serial2.print(",MR_IV_O=");
-   Serial2.print(mainInletValveOpen);
+   Serial2.print(mainReservoirInletValve.isValveOpen() ? 1 : 0);
    Serial2.print(",DB_Weight=");
    Serial2.print(lastDutchBucketWeight);
    Serial2.print(",DB_IV_O=");
-   Serial2.print(dutchBucketInletValveOpen);
+   Serial2.print(dutchBucketInletValve.isValveOpen() ? 1 : 0);
    Serial2.print(",EF_Weight=");
    Serial2.print(lastEbbFlowWeight);
    Serial2.print(",EF_IV_O=");
-   Serial2.print(ebbFlowInletValveOpen);
+   Serial2.print(ebbFlowInletValve.isValveOpen() ? 1 : 0);
    Serial2.print(",MR_IV_Flow=");
-   Serial2.println(mainInletValveflowRate, 2);
+   Serial2.print(mainInletValveflowRate, 2);
+   Serial2.print(",EF_NV_O=");
+   Serial2.print(ebbFlowNutrientValve.isValveOpen() ? 1 : 0);
+   Serial2.print(",DB_NV_O=");
+   Serial2.println(dutchBucketNutrientValve.isValveOpen() ? 1 : 0);
 }
